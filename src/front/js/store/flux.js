@@ -28,64 +28,160 @@ const getState = ({ getStore, getActions, setStore }) => {
 
       login: async (formData1) => {
         const actions = getActions();
+        const store = getStore()
         try {
-          const url = `${process.env.BACKEND_URL}/api/login`;
-          console.log("URL final:", url);
-          console.log("Datos enviados al servidor:", formData1);
-
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(formData1),
-          });
-
-          const data = await response.json();
-          console.log("Respuesta del servidor:", data);
-
-          if (response.ok) {
-            localStorage.setItem("Token", data.token);
-            localStorage.setItem("user", JSON.stringify(data.user));
-            setStore({ isLogged: true, Token: data.token, user: data.user });
-
-            await actions.userShoppingCart()
-          } else {
-          }
-        } catch (error) {
-          console.error("Error al conectar con el servidor:", error);
-        }
-      },
-
-      register: async (formData) => {
-        try {
-            console.log("Datos del formulario para registro:", formData);  // Verifica que los datos son correctos
+            const url = `${process.env.BACKEND_URL}/api/login`;
     
-            const response = await fetch(`${process.env.BACKEND_URL}/api/register`, {
+            // Recuperar los datos locales antes de loguear
+            let localFavorites = JSON.parse(localStorage.getItem("localFavorites")) || [];
+            let localShoppingCart = JSON.parse(localStorage.getItem("localShoppingCart")) || [];
+    
+            const response = await fetch(url, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(formData1),
             });
     
             const data = await response.json();
     
             if (response.ok) {
-                // Registro exitoso
-                console.log("Token:", data.token);
-                console.log("Usuario:", data.user);
+                console.log("Login exitoso, usuario:", data.user);
+   
                 localStorage.setItem("Token", data.token);
                 localStorage.setItem("user", JSON.stringify(data.user));
                 setStore({ isLogged: true, Token: data.token, user: data.user });
+    
+                const userId = data.user.id;
+    
+                localFavorites = store.localFavorites.map(fav => ({
+                    product_id: fav.product_id,
+                    user_id: userId
+                }));
+    
+                localShoppingCart = store.localShoppingCart.map(item => ({
+                    product_id: item.product_id,
+                    user_id: userId
+                }));
+    
+                console.log("Enviando datos al backend:", { userId, localFavorites, localShoppingCart });
+    
+                // Enviar los datos locales al backend
+                const mergeResponse = await fetch(`${process.env.BACKEND_URL}/api/merge-data`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${data.token}`
+                    },
+                    body: JSON.stringify({ userId, localFavorites, localShoppingCart })
+                });
+    
+                const mergeData = await mergeResponse.json();
+                console.log("Respuesta de la fusión de datos:", mergeData);
+    
+                if (mergeResponse.ok) {
+                    console.log("Datos locales fusionados con éxito.")                    
+                    setStore({ localFavorites: [], localShoppingCart: [] });  
+                  
+                    await actions.userShoppingCart();
+
+                   
+                } else {
+                    console.error("Error al fusionar datos:", mergeData.msg);
+                }
+    
             } else {
-                // Si no fue exitoso, mostrar mensaje de error
-                console.error('Error en el registro:', data.msg || 'Error desconocido');
+                console.error("Error en el login:", data.msg);
             }
         } catch (error) {
-            console.error("Error en el registro:", error);
+            console.error("Error al conectar con el servidor:", error);
         }
     },
+    
+    
+
+    register: async (formData) => {
+      try {
+          console.log("Datos del formulario para registro:", formData);
+  
+          //Recuperar los datos locales antes de registrarse
+          let localFavorites = JSON.parse(localStorage.getItem("localFavorites")) || [];
+          let localShoppingCart = JSON.parse(localStorage.getItem("localShoppingCart")) || [];
+  
+          console.log("Favoritos antes del registro:", localFavorites);
+          console.log("Carrito antes del registro:", localShoppingCart);
+  
+          //Enviar los datos del usuario para registrarse
+          const response = await fetch(`${process.env.BACKEND_URL}/api/register`, {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+              },
+              body: JSON.stringify(formData),
+          });
+  
+          const data = await response.json();
+  
+          if (response.ok) {
+              console.log("Registro exitoso, usuario:", data.user);
+              console.log("Token recibido:", data.token);
+  
+              localStorage.setItem("Token", data.token);
+              localStorage.setItem("user", JSON.stringify(data.user));
+              setStore({ isLogged: true, Token: data.token, user: data.user });
+  
+              const userId = data.user.id;
+  
+              // 🔹 Asociar favoritos y carrito al nuevo usuario
+              const formattedFavorites = localFavorites.map(fav => ({
+                  product_id: fav.product_id,
+                  user_id: userId
+              }));
+  
+              const formattedShoppingCart = localShoppingCart.map(item => ({
+                  product_id: item.product_id,
+                  user_id: userId
+              }));
+  
+              console.log("Enviando datos al backend tras registro:", { userId, formattedFavorites, formattedShoppingCart });
+  
+              //Enviar los datos al backend para fusionarlos con la nueva cuenta
+              const mergeResponse = await fetch(`${process.env.BACKEND_URL}/api/merge-data`, {
+                  method: "POST",
+                  headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${data.token}`
+                  },
+                  body: JSON.stringify({ userId, localFavorites: formattedFavorites, localShoppingCart: formattedShoppingCart })
+              });
+  
+              const mergeData = await mergeResponse.json();
+              console.log("Respuesta de la fusión de datos tras registro:", mergeData);
+  
+              if (mergeResponse.ok) {
+                  console.log("Datos locales fusionados con éxito tras registro.");
+  
+                  //Vaciar favoritos y carrito locales
+                  localStorage.removeItem("localFavorites");
+                  localStorage.removeItem("localShoppingCart");
+                  setStore({ localFavorites: [], localShoppingCart: [] });
+  
+                  //Recargar el carrito desde el backend
+                  await getActions().userShoppingCart();
+                  await getActions().getFavorites();
+              } else {
+                  console.error("Error al fusionar datos tras registro:", mergeData.msg);
+              }
+          } else {
+              console.error("Error en el registro:", data.msg || "Error desconocido");
+          }
+      } catch (error) {
+          console.error("Error en el registro:", error);
+      }
+  },
+  
+  
     
       isLogged: async () => {
         try {
@@ -104,6 +200,41 @@ const getState = ({ getStore, getActions, setStore }) => {
         }
       },
 
+      updateUserProfile: async (userId, updatedData) => {
+        const store = getStore();
+        try {
+            const token = store.Token;
+            if (!token) {
+                console.error("No se encontró un token válido");
+                return null;
+            }
+    
+            // Verifica que updatedData no esté vacío
+            console.log("Datos que se van a actualizar:", updatedData);
+    
+            const response = await fetch(`${process.env.BACKEND_URL}/api/user/${userId}`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify(updatedData)
+            });
+    
+            if (!response.ok) {
+                const errorDetails = await response.text(); // Obtener detalles del error del servidor
+                console.error("Error al actualizar perfil, código:", response.status, "Detalles:", errorDetails);
+                throw new Error("Error al actualizar perfil");
+            }
+    
+            const data = await response.json();
+            console.log("Perfil actualizado:", data);
+            return data;
+        } catch (error) {
+            console.error("Error en updateUserProfile:", error);
+            return null;
+        }
+    },
       //------------------------------------------------------LOAD INFO--------------------------------------------------
 
       loadInfo: async () => {
@@ -155,6 +286,7 @@ const getState = ({ getStore, getActions, setStore }) => {
           console.error("Error al cargar las reseñas:", error);
         }
       },
+
       getAllUsers: async () => {
         try {
           const store = getStore();
@@ -199,33 +331,31 @@ const getState = ({ getStore, getActions, setStore }) => {
 
       sellProduct: async (formData, navigate) => {
         const store = getStore();
-
+    
         const payload = { ...formData, state: formData.state === "True", promoted: formData.promoted === "True" };
         console.log("Enviando datos a /api/product:", payload);
-
+    
         try {
-          const response = await fetch(`${process.env.BACKEND_URL}/api/product`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${store.Token}`,
-            },
-            body: JSON.stringify(formData),
-          });
-
-          const data = await response.json();
-
-          if (response.ok) {
-            alert("Producto publicado con éxito 🎉");
-            navigate("/");
-          } else {
-            alert(data.msg || "Error al publicar el producto ⚠️ ");
-          }
+            const response = await fetch(`${process.env.BACKEND_URL}/api/product`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${store.Token}`,
+                },
+                body: JSON.stringify(payload),
+            });
+    
+            const data = await response.json();
+    
+            if (response.ok) {
+            } else {
+                alert(data.msg || "Error al publicar el producto ⚠️");
+            }
         } catch (error) {
-          console.error("Error al publicar producto:", error);
-          alert("Error al conectar con el servidor");
+            console.error("Error al publicar producto:", error);
+            alert("Error al conectar con el servidor");
         }
-      },
+    },
 
       //---------------------------------------------------------FAVS---------------------------------------------------
 
@@ -251,8 +381,43 @@ const getState = ({ getStore, getActions, setStore }) => {
           if (response.ok) {
             console.log("Respuesta del servidor:", data);
             const updatedFavorites = data.updatedFavorites || [];
-            const user = { ...store.user, favorites: updatedFavorites };
-            setStore({ user });
+            setStore({ 
+              user: { ...store.user, favorites: updatedFavorites },
+              localFavorites: updatedFavorites.map(id => ({ product_id: id })) 
+          });
+          } else {
+            console.error("Error del servidor:", data);
+          }
+        } catch (error) {
+          console.error("Error de red:", error);
+        }
+      },
+
+      removeFav: async (productId) => {
+        const store = getStore();
+        if (!store.Token) {
+          return;
+        }
+      
+        try {
+          const response = await fetch(`${process.env.BACKEND_URL}/api/favorite/${productId}`, {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: store.Token ? `Bearer ${store.Token}` : "",
+            },
+          });
+      
+          const data = await response.json();
+      
+          if (response.ok) {
+            console.log("Respuesta del servidor:", data);
+            const updatedFavorites = data.updatedFavorites || [];
+            
+            setStore({ 
+              user: { ...store.user, favorites: updatedFavorites },
+              localFavorites: updatedFavorites.map(id => ({ product_id: id }))
+            });
           } else {
             console.error("Error del servidor:", data);
           }
@@ -263,34 +428,28 @@ const getState = ({ getStore, getActions, setStore }) => {
 
       toggleLocalFav: (newFav) => {
         const store = getStore();
-
-        const isFavorite = store.localFavorites.some(
-          (el) => (el.product_id
-            === newFav.product_id
-          )
-        );
-
-        if (isFavorite) {
-
-          setStore({
-            localFavorites: store.localFavorites.filter(
-              (el) => !((el.product_id
-                === newFav.product_id
-              ))
-            ),
-          });
-        } else {
-
-          setStore({
-            localFavorites: [
-              ...store.localFavorites,
-              { product_id: newFav.product_id },
-            ],
-          });
+    
+        if (store.isLogged) {
+            getActions().toggleFav(newFav);  
+            return;
         }
-
-        console.log(getStore().localFavorites);
-      },
+    
+        let updatedFavorites = [...store.localFavorites];
+    
+        // Verificar si el producto ya está en favoritos
+        const isFavorite = updatedFavorites.some(el => el.product_id === newFav.product_id);
+    
+        if (isFavorite) {
+            updatedFavorites = updatedFavorites.filter(el => el.product_id !== newFav.product_id);
+        } else {
+            updatedFavorites.push({ product_id: newFav.product_id });
+        }
+    
+        setStore({ localFavorites: updatedFavorites });
+        localStorage.setItem("localFavorites", JSON.stringify(updatedFavorites)); // Guardar en localStorage
+    
+        console.log("Favoritos locales guardados en localStorage:", JSON.parse(localStorage.getItem("localFavorites")));
+    },
 
       //--------------------------------------------------------SHOPPING CART--------------------------------------------
       userShoppingCart: async () => {
@@ -349,38 +508,29 @@ const getState = ({ getStore, getActions, setStore }) => {
 
       toggleLocalCart: (newShoppingItem) => {
         const store = getStore();
-
-        const isInCart = store.localShoppingCart.some(
-          (el) => (el.product_id
-            === newShoppingItem.product_id
-          )
-        );
-
+    
+        let updatedCart = [...store.localShoppingCart];
+    
+        const isInCart = updatedCart.some(el => el.product_id === newShoppingItem.product_id);
+    
         if (isInCart) {
-
-          setStore({
-            localShoppingCart: store.localShoppingCart.filter(
-              (el) => !((el.product_id
-                === newShoppingItem.product_id
-              ))
-            ),
-          });
+            updatedCart = updatedCart.filter(el => el.product_id !== newShoppingItem.product_id);
         } else {
-
-          setStore({
-            localShoppingCart: [
-              ...store.localShoppingCart,
-              { product_id: newShoppingItem.product_id,
+            updatedCart.push({
+                product_id: newShoppingItem.product_id,
                 name: newShoppingItem.name,
                 img: newShoppingItem.img,
-                price: newShoppingItem.price,
-               },
-            ],
-          });
+                price: newShoppingItem.price
+            });
         }
-      },
+    
+        setStore({ localShoppingCart: updatedCart });
+        localStorage.setItem("localShoppingCart", JSON.stringify(updatedCart)); //Guardar en localStorage
+    
+        console.log("Carrito local guardado en localStorage:", JSON.parse(localStorage.getItem("localShoppingCart")));
+    },
 
-
+      //------------------------------------------------------UPLOAD_PHOTO-----------------------------------------------
 
       uploadImageToBackend: async (selectedFile) => {
         if (!selectedFile) {
